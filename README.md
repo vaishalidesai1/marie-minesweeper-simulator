@@ -1,5 +1,10 @@
 # Minesweeper in MARIE.js — Overall Summary
 
+## Report
+
+Overleaf project (full write-up and documentation):  
+https://www.overleaf.com/6586667898kvfbzpdncpzv#6dea7d
+
 ## Architecture
 
 Two parallel flat arrays in memory, both indexed by:
