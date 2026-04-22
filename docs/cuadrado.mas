@@ -1,0 +1,1560 @@
+/ =================================================================
+/ BUSCAMINAS 16x16 — display MARIE
+/ Minas: 8 (contorno cuadrado) | Inputs: fila, col, accion(1=revelar 2=bandera)
+/ val original=oculta | val+100=descubierta | val+200=bandera
+/ Score: movimientos totales (revelar + banderas)
+/ =================================================================
+
+        ORG 000
+
+/ ── FASE 1: Pintar todo el display de gris oscuro ───────────────
+        Load  DispBase
+        Store Ptr
+        LoadImmi 0FF
+        Store Cnt
+PintaG, Load  Gris
+        StoreI Ptr
+        Load  Ptr
+        Add   Uno
+        Store Ptr
+        Load  Cnt
+        SkipCond 400
+        Jump  DecrG
+        Jump  IniJuego
+DecrG,  Load  Cnt
+        Subt  Uno
+        Store Cnt
+        Jump  PintaG
+
+/ ── FASE 2: Inicializar contador de celdas seguras ──────────────
+IniJuego, Load  Seguras
+        Store CntSeg
+
+/ ══════════════════════════════════════════════════════════════════
+/ BLOQUE FIGURA — leer inputs, limpiar tablero, dibujar figura
+/
+/ Inputs del usuario (en este orden):
+/   1) Fila de la esquina superior-izquierda  (1-16)
+/   2) Columna de la esquina superior-izquierda (1-16)
+/   3) Lado del cuadrado (2-16)
+/
+/ PASO 1: leer inputs
+/ PASO 2: limpiar tablero
+/ PASO 3: dibujar contorno via PintarPunto (wrap toroidal)
+/
+/ ═══ PARA CAMBIAR DE FIGURA: reemplazar solo el bloque
+/     "PASO 3" entre las etiquetas IniTrig y FinFigura,
+/     y ajustar la subrutina PintarPunto si se necesitan
+/     variables extra. El resto del motor no cambia.
+/ ══════════════════════════════════════════════════════════════════
+
+/ ── PASO 1: leer inputs del usuario ─────────────────────────────
+        JnS   PrintMsgFila / pedir fila origen
+        Input
+        Subt  Uno
+        Store CuadFilaO    / esquina sup-izq fila, 0-indexed
+
+        JnS   PrintMsgCol  / pedir columna origen
+        Input
+        Subt  Uno
+        Store CuadColO     / esquina sup-izq col, 0-indexed
+
+        JnS   PrintMsgTam  / pedir tamaño (lado)
+        Input
+        Store CuadLado     / lado del cuadrado
+
+/ ── PASO 2: limpiar tablero — escribir 0 en las 256 celdas ──────
+        Load  TablBase
+        Store CleanPtr
+        LoadImmi 0FF
+        Store CleanCnt
+CleanL, Load  Cero
+        StoreI CleanPtr
+        Load  CleanPtr
+        Add   Uno
+        Store CleanPtr
+        Load  CleanCnt
+        SkipCond 400
+        Jump  CleanD
+        Jump  IniTrig
+CleanD, Load  CleanCnt
+        Subt  Uno
+        Store CleanCnt
+        Jump  CleanL
+
+/ ══════════════════════════════════════════════════════════════════
+/ PASO 3: FIGURA — contorno del cuadrado con wrap toroidal
+/ FOR RF = 0 .. CuadLado-1
+/   FOR CF = 0 .. CuadLado-1
+/     SI borde: PR = CuadFilaO+RF, PC = CuadColO+CF → PintarPunto
+/ ══════════════════════════════════════════════════════════════════
+IniTrig, Clear
+        Store RF
+
+ForExt, Load  RF
+        Subt  CuadLado
+        SkipCond 000
+        Jump  FinFigura
+
+        Clear
+        Store CF
+
+ForInt, Load  CF
+        Subt  CuadLado
+        SkipCond 000
+        Jump  AvRF
+
+/ ── Es borde? RF==0 OR RF==CuadLado-1 OR CF==0 OR CF==CuadLado-1
+        Load  RF
+        SkipCond 400
+        Jump  ChkBordeInf
+        Jump  EsBorde
+ChkBordeInf, Load RF
+        Add   Uno
+        Subt  CuadLado
+        SkipCond 400
+        Jump  ChkBordeIzq
+        Jump  EsBorde
+ChkBordeIzq, Load CF
+        SkipCond 400
+        Jump  ChkBordeDer
+        Jump  EsBorde
+ChkBordeDer, Load CF
+        Add   Uno
+        Subt  CuadLado
+        SkipCond 400
+        Jump  AvCF         / interior → saltar
+
+EsBorde, Load  CuadFilaO
+        Add   RF
+        Store PR
+        Load  CuadColO
+        Add   CF
+        Store PC
+        JnS   PintarPunto
+
+AvCF,   Load  CF
+        Add   Uno
+        Store CF
+        Jump  ForInt
+
+AvRF,   Load  RF
+        Add   Uno
+        Store RF
+        Jump  ForExt
+
+FinFigura, Jump  Turno
+
+/ ══════════════════════════════════════════════════════════════════
+/ SUBRUTINA PintarPunto — wrap toroidal en las 4 direcciones
+/ Entrada: PR (fila), PC (columna) — pueden ser negativos o > 15
+/ Aplica mod 16 con una suma/resta de 16 (rango de entrada: -15..30)
+/ ══════════════════════════════════════════════════════════════════
+PintarPunto, HEX 0
+
+        / --- Wrap fila PR ---
+        Load  PR
+        SkipCond 000           / PR < 0?
+        Jump  PPRpos
+        Load  PR
+        Add   Diezseis         / PR += 16
+        Store PR
+        Jump  PPRchkHi
+PPRpos, Load  PR
+PPRchkHi, Subt Quince
+        SkipCond 800           / PR > 15?
+        Jump  PPRok
+        Load  PR
+        Subt  Diezseis         / PR -= 16
+        Store PR
+
+        / --- Wrap columna PC ---
+PPRok,  Load  PC
+        SkipCond 000           / PC < 0?
+        Jump  PPCpos
+        Load  PC
+        Add   Diezseis         / PC += 16
+        Store PC
+        Jump  PPCchkHi
+PPCpos, Load  PC
+PPCchkHi, Subt Quince
+        SkipCond 800           / PC > 15?
+        Jump  PPCok
+        Load  PC
+        Subt  Diezseis         / PC -= 16
+        Store PC
+
+        / --- idx = PR*16 + PC + TablBase → escribir mina ---
+PPCok,  Load  PR
+        Add   PR
+        Add   PR
+        Add   PR
+        Add   PR
+        Add   PR
+        Add   PR
+        Add   PR
+        Add   PR
+        Add   PR
+        Add   PR
+        Add   PR
+        Add   PR
+        Add   PR
+        Add   PR
+        Add   PR
+        Add   PC
+        Add   TablBase
+        Store FigPtr
+        Load  MinaVal
+        StoreI FigPtr
+        JumpI PintarPunto
+
+/ ── Turno: outputs de guia + leer fila, columna, accion ─────────
+Turno,  JnS   PrintMsgMov
+        JnS   ImprimirNum
+        Load  CharNL
+        Output
+        JnS   PrintMsgFila
+        Input              / fila (1-16)
+        Subt  Uno
+        Store FilaIn
+        JnS   PrintMsgCol
+        Input              / columna (1-16)
+        Subt  Uno
+        Store ColIn
+        JnS   PrintMsgAcc
+        Input              / accion: 1=revelar, 2=bandera
+        Store Accion
+
+/ ── idx = fila*16 + col ─────────────────────────────────────────
+        Load  FilaIn
+        Add   FilaIn
+        Add   FilaIn
+        Add   FilaIn
+        Add   FilaIn
+        Add   FilaIn
+        Add   FilaIn
+        Add   FilaIn
+        Add   FilaIn
+        Add   FilaIn
+        Add   FilaIn
+        Add   FilaIn
+        Add   FilaIn
+        Add   FilaIn
+        Add   FilaIn
+        Add   FilaIn
+        Add   ColIn
+        Store Idx
+
+/ ── Punteros a tablero y display ────────────────────────────────
+        Add   TablBase
+        Store TablPtr
+        Load  Idx
+        Add   DispBase
+        Store DispPtr
+
+/ ── Leer valor actual de tablero[Idx] ───────────────────────────
+        LoadI TablPtr
+        Store ValCelda
+
+/ ── Detectar estado de celda por color del display ──────────────
+        LoadI DispPtr
+        Subt  Gris
+        SkipCond 400
+        Jump  NoEsGris
+        Jump  ChkAccion
+NoEsGris, LoadI DispPtr
+        Subt  Amarillo
+        SkipCond 400
+        Jump  Turno        / descubierta → ignorar
+
+/ ── ChkBandera: celda con bandera ───────────────────────────────
+ChkBandera, Load Accion
+        Subt  Uno
+        SkipCond 400
+        Jump  ChkTogBand
+        JnS   PrintMsgBand / OUTPUT: 'NoBand!'
+        Jump  Turno
+
+/ ── Toggle bandera ──────────────────────────────────────────────
+ChkTogBand, LoadI DispPtr
+        Subt  Amarillo
+        SkipCond 400
+        Jump  PonerBandera
+
+/ ── Quitar bandera ──────────────────────────────────────────────
+        Load  ValCelda
+        Subt  MarcaBand
+        StoreI TablPtr
+        Load  Gris
+        StoreI DispPtr
+        Jump  ContarMov
+
+/ ── Poner bandera ───────────────────────────────────────────────
+PonerBandera, Load ValCelda
+        Add   MarcaBand
+        StoreI TablPtr
+        Load  Amarillo
+        StoreI DispPtr
+        Jump  ContarMov
+
+/ ── ChkAccion: celda oculta sin bandera ─────────────────────────
+ChkAccion, Load Accion
+        Subt  Uno
+        SkipCond 400
+        Jump  PonerBandera
+        Jump  Descubrir
+
+/ ── Descubrir ───────────────────────────────────────────────────
+Descubrir, LoadI DispPtr
+        Subt  Amarillo
+        SkipCond 400
+        Jump  ChkMina
+        Jump  Turno
+ChkMina, Load ValCelda
+        Add   Uno
+        SkipCond 400
+        Jump  NoesMina
+
+/ ── ES MINA: revelar todas en negro + Halt ──────────────────────
+        Load  TablBase
+        Store Ptr
+        Load  DispBase
+        Store DispPtr2
+        LoadImmi 0FF
+        Store Cnt
+RevMin, LoadI Ptr
+        Store ValTemp
+        Add   Uno
+        SkipCond 400
+        Jump  ChkMinaBand
+        Load  Negro
+        StoreI DispPtr2
+        Jump  AvanzaRev
+ChkMinaBand, Load ValTemp
+        Subt  MinaBand
+        SkipCond 400
+        Jump  AvanzaRev
+        Load  Negro
+        StoreI DispPtr2
+AvanzaRev, Load Ptr
+        Add   Uno
+        Store Ptr
+        Load  DispPtr2
+        Add   Uno
+        Store DispPtr2
+        Load  Cnt
+        SkipCond 400
+        Jump  DecrR
+        JnS   PrintMsgPierde
+        Load  Movimientos
+        Output
+        Load  CharNL
+        Output
+        Halt               / FIN: perdiste
+DecrR,  Load  Cnt
+        Subt  Uno
+        Store Cnt
+        Jump  RevMin
+
+/ ── No es mina: color segun distancia (0-8) ────────────────────
+NoesMina, Load ValCelda
+        SkipCond 400
+        Jump  EsN1
+        Load  GrisC
+        Jump  PintarCelda
+EsN1,   Load  ValCelda
+        Subt  Uno
+        SkipCond 400
+        Jump  EsN2
+        Load  C1
+        Jump  PintarCelda
+EsN2,   Load  ValCelda
+        Subt  Dos
+        SkipCond 400
+        Jump  EsN3
+        Load  C2
+        Jump  PintarCelda
+EsN3,   Load  ValCelda
+        Subt  Tres
+        SkipCond 400
+        Jump  EsN4
+        Load  C3
+        Jump  PintarCelda
+EsN4,   Load  ValCelda
+        Subt  Cuatro
+        SkipCond 400
+        Jump  EsN5
+        Load  C4
+        Jump  PintarCelda
+EsN5,   Load  ValCelda
+        Subt  Cinco
+        SkipCond 400
+        Jump  EsN6
+        Load  C5
+        Jump  PintarCelda
+EsN6,   Load  ValCelda
+        Subt  Seis
+        SkipCond 400
+        Jump  EsN7
+        Load  C6
+        Jump  PintarCelda
+EsN7,   Load  ValCelda
+        Subt  Siete
+        SkipCond 400
+        Jump  EsN8
+        Load  C7
+        Jump  PintarCelda
+EsN8,   Load  C8
+
+PintarCelda, StoreI DispPtr
+
+/ ── Marcar descubierta (val+100), decrementar seguras ───────────
+        Load  ValCelda
+        Add   MarcaDesc
+        StoreI TablPtr
+        Load  CntSeg
+        Subt  Uno
+        Store CntSeg
+
+/ ── Si era vacia (val==0) lanzar flood fill ─────────────────────
+        Load  ValCelda
+        SkipCond 400
+        Jump  ContarMov
+        Jump  IniFlood
+
+/ ── FLOOD FILL ──────────────────────────────────────────────────
+IniFlood, Load  Idx
+        Store FloodOrig
+
+/ ── Fase 1: subir por la columna ────────────────────────────────
+        Load  FloodOrig
+        Store CurIdx
+SubirLoop, Load CurIdx
+        Subt  Diezseis
+        SkipCond 000
+        Jump  FinSubir
+        Store CurIdx
+        Load  CurIdx
+        Add   TablBase
+        Store WTPtr
+        Load  CurIdx
+        Add   DispBase
+        Store WDPtr
+        LoadI WDPtr
+        Subt  Gris
+        SkipCond 400
+        Jump  FinSubir
+        LoadI WTPtr
+        Store WVal
+        Add   Uno
+        SkipCond 800
+        Jump  FinSubir
+        JnS   PintaColor
+        Load  WVal
+        Add   MarcaDesc
+        StoreI WTPtr
+        Load  CntSeg
+        Subt  Uno
+        Store CntSeg
+        Load  WVal
+        SkipCond 400
+        Jump  FinSubir
+        Jump  SubirLoop
+FinSubir, Load  Cero
+
+/ ── Fase 2: bajar por la columna ────────────────────────────────
+        Load  FloodOrig
+        Store CurIdx
+BajarLoop, Load CurIdx
+        Add   Diezseis
+        Store CurIdx
+        Subt  MaxIdx
+        SkipCond 000
+        Jump  FinBajar
+        Load  CurIdx
+        Add   TablBase
+        Store WTPtr
+        Load  CurIdx
+        Add   DispBase
+        Store WDPtr
+        LoadI WDPtr
+        Subt  Gris
+        SkipCond 400
+        Jump  FinBajar
+        LoadI WTPtr
+        Store WVal
+        Add   Uno
+        SkipCond 800
+        Jump  FinBajar
+        JnS   PintaColor
+        Load  WVal
+        Add   MarcaDesc
+        StoreI WTPtr
+        Load  CntSeg
+        Subt  Uno
+        Store CntSeg
+        Load  WVal
+        SkipCond 400
+        Jump  FinBajar
+        Jump  BajarLoop
+FinBajar, Load  Cero
+
+/ ── Fase 3: wave por columnas ────────────────────────────────────
+        LoadImmi 1
+        Store FFChg
+
+FFWLOOP, Load  FFChg
+        SkipCond 800
+        Jump  ContarMov
+        Clear
+        Store FFChg
+        Clear
+        Store WC
+
+FFCLOOP, Load  WC
+        Subt  Diezseis
+        SkipCond 000
+        Jump  FFWLOOP
+        Clear
+        Store WR
+
+FFRLOOP, Load  WR
+        Subt  Diezseis
+        SkipCond 000
+        Jump  FFINCC
+
+        Load  WR
+        Add   WR
+        Add   WR
+        Add   WR
+        Add   WR
+        Add   WR
+        Add   WR
+        Add   WR
+        Add   WR
+        Add   WR
+        Add   WR
+        Add   WR
+        Add   WR
+        Add   WR
+        Add   WR
+        Add   WR
+        Add   WC
+        Store WIDX
+
+        Load  WIDX
+        Add   DispBase
+        Store WDPtr
+        LoadI WDPtr
+        Subt  GrisC
+        SkipCond 400
+        Jump  FFINCR
+
+        / Vecino (-1,-1)
+        Load  WR
+        Subt  Uno
+        Store NR
+        Load  WC
+        Subt  Uno
+        Store NC
+        JnS   FFRVNGH
+
+        / Vecino (-1,+0)
+        Load  WR
+        Subt  Uno
+        Store NR
+        Load  WC
+        Store NC
+        JnS   FFRVNGH
+
+        / Vecino (-1,+1)
+        Load  WR
+        Subt  Uno
+        Store NR
+        Load  WC
+        Add   Uno
+        Store NC
+        JnS   FFRVNGH
+
+        / Vecino (+0,-1)
+        Load  WR
+        Store NR
+        Load  WC
+        Subt  Uno
+        Store NC
+        JnS   FFRVNGH
+
+        / Vecino (+0,+1)
+        Load  WR
+        Store NR
+        Load  WC
+        Add   Uno
+        Store NC
+        JnS   FFRVNGH
+
+        / Vecino (+1,-1)
+        Load  WR
+        Add   Uno
+        Store NR
+        Load  WC
+        Subt  Uno
+        Store NC
+        JnS   FFRVNGH
+
+        / Vecino (+1,+0)
+        Load  WR
+        Add   Uno
+        Store NR
+        Load  WC
+        Store NC
+        JnS   FFRVNGH
+
+        / Vecino (+1,+1)
+        Load  WR
+        Add   Uno
+        Store NR
+        Load  WC
+        Add   Uno
+        Store NC
+        JnS   FFRVNGH
+
+FFINCR, Load  WR
+        Add   Uno
+        Store WR
+        Jump  FFRLOOP
+
+FFINCC, Load  WC
+        Add   Uno
+        Store WC
+        Jump  FFCLOOP
+
+/ ── Subrutina FFRVNGH ───────────────────────────────────────────
+FFRVNGH, HEX 0
+        Clear
+        Store WVal
+        Load  NR
+        SkipCond 000
+        Jump  FFRV1
+        JumpI FFRVNGH
+FFRV1,  Load  NR
+        Subt  Diezseis
+        SkipCond 000
+        JumpI FFRVNGH
+        Load  NC
+        SkipCond 000
+        Jump  FFRV2
+        JumpI FFRVNGH
+FFRV2,  Load  NC
+        Subt  Diezseis
+        SkipCond 000
+        JumpI FFRVNGH
+        Load  NR
+        Add   NR
+        Add   NR
+        Add   NR
+        Add   NR
+        Add   NR
+        Add   NR
+        Add   NR
+        Add   NR
+        Add   NR
+        Add   NR
+        Add   NR
+        Add   NR
+        Add   NR
+        Add   NR
+        Add   NR
+        Add   NC
+        Store NIDX
+        Load  NIDX
+        Add   DispBase
+        Store WDPtr
+        LoadI WDPtr
+        Subt  Gris
+        SkipCond 400
+        JumpI FFRVNGH
+        Load  NIDX
+        Add   TablBase
+        Store WTPtr
+        LoadI WTPtr
+        Store WVal
+        Add   Uno
+        SkipCond 800
+        JumpI FFRVNGH
+        JnS   PintaColor
+        Load  WVal
+        Add   MarcaDesc
+        StoreI WTPtr
+        Load  CntSeg
+        Subt  Uno
+        Store CntSeg
+        LoadImmi 1
+        Store FFChg
+        JumpI FFRVNGH
+
+/ ── Subrutina PintaColor ────────────────────────────────────────
+PintaColor, HEX 0
+        Load  WVal
+        SkipCond 400
+        Jump  PC_N1
+        Load  GrisC
+        Jump  PC_PINTA
+PC_N1,  Load  WVal
+        Subt  Uno
+        SkipCond 400
+        Jump  PC_N2
+        Load  C1
+        Jump  PC_PINTA
+PC_N2,  Load  WVal
+        Subt  Dos
+        SkipCond 400
+        Jump  PC_N3
+        Load  C2
+        Jump  PC_PINTA
+PC_N3,  Load  WVal
+        Subt  Tres
+        SkipCond 400
+        Jump  PC_N4
+        Load  C3
+        Jump  PC_PINTA
+PC_N4,  Load  WVal
+        Subt  Cuatro
+        SkipCond 400
+        Jump  PC_N5
+        Load  C4
+        Jump  PC_PINTA
+PC_N5,  Load  WVal
+        Subt  Cinco
+        SkipCond 400
+        Jump  PC_N6
+        Load  C5
+        Jump  PC_PINTA
+PC_N6,  Load  WVal
+        Subt  Seis
+        SkipCond 400
+        Jump  PC_N7
+        Load  C6
+        Jump  PC_PINTA
+PC_N7,  Load  WVal
+        Subt  Siete
+        SkipCond 400
+        Jump  PC_N8
+        Load  C7
+        Jump  PC_PINTA
+PC_N8,  Load  C8
+PC_PINTA, StoreI WDPtr
+        JumpI PintaColor
+
+/ ── Contar movimiento y verificar victoria ──────────────────────
+ContarMov, Load  Movimientos
+        Add   Uno
+        Store Movimientos
+        Load  CntSeg
+        SkipCond 400
+        Jump  Turno
+        JnS   PrintMsgGana
+        Load  Movimientos
+        Output
+        Load  CharNL
+        Output
+        Halt               / FIN: ganaste
+
+/ ── Variables ───────────────────────────────────────────────────
+FilaIn,      DEC 0
+ColIn,       DEC 0
+Accion,      DEC 0
+Idx,         DEC 0
+Ptr,         DEC 0
+TablPtr,     DEC 0
+DispPtr,     DEC 0
+DispPtr2,    DEC 0
+ValCelda,    DEC 0
+ValTemp,     DEC 0
+CntSeg,      DEC 0
+Cnt,         DEC 0
+Movimientos, DEC 0
+FloodOrig,   DEC 0
+CurIdx,      DEC 0
+FFChg,       DEC 0
+WR,          DEC 0
+WC,          DEC 0
+WIDX,        DEC 0
+WDPtr,       DEC 0
+WTPtr,       DEC 0
+WVal,        DEC 0
+NR,          DEC 0
+NC,          DEC 0
+NIDX,        DEC 0
+Seguras,     DEC 248
+TablBase,    HEX 400
+DispBase,    HEX 0F00
+MarcaDesc,   DEC 100
+MarcaBand,   DEC 200
+MinaBand,    DEC 199
+Cero,        DEC 0
+Uno,         DEC 1
+Dos,         DEC 2
+Tres,        DEC 3
+Cuatro,      DEC 4
+Cinco,       DEC 5
+Seis,        DEC 6
+Siete,       DEC 7
+Diezseis,    DEC 16
+MaxIdx,      DEC 256
+Gris,        HEX 294A     / gris oscuro: oculta
+GrisC,       HEX 6318     / gris claro: 0 vecinos
+Negro,       HEX 0000     / negro: mina
+Amarillo,    HEX 5E65     / amarillo: bandera
+C1,          HEX 1DB5     / azul
+C2,          HEX 1E29     / verde
+C3,          HEX 654A     / rojo
+C4,          HEX 0CCD     / azul oscuro
+C5,          HEX 3484     / rojo oscuro
+C6,          HEX 1631     / turquesa
+C7,          HEX 34F3     / violeta
+C8,          HEX 6B5A     / blanco
+ImpVal,      DEC 0
+ImpDig,      DEC 0
+ImpFlag,     DEC 0
+Ascii0,      DEC 48
+Cien,        DEC 100
+Diez,        DEC 10
+/ ── Bloque figura ───────────────────────────────────────────────
+CuadLado,    DEC 3        / lado (se sobreescribe con input)
+CuadFilaO,   DEC 0        / fila esquina sup-izq (se sobreescribe)
+CuadColO,    DEC 0        / col  esquina sup-izq (se sobreescribe)
+MinaVal,     DEC -1
+RF,          DEC 0
+CF,          DEC 0
+PR,          DEC 0        / fila a pintar (para PintarPunto)
+PC,          DEC 0        / col  a pintar (para PintarPunto)
+FigPtr,      DEC 0
+CleanPtr,    DEC 0
+CleanCnt,    DEC 0
+Quince,      DEC 15
+/ ── Subrutina ImprimirNum ───────────────────────────────────────
+ImprimirNum, HEX 0
+        Load  Movimientos
+        Store ImpVal
+        Clear
+        Store ImpFlag
+        Clear
+        Store ImpDig
+ImpC,   Load  ImpVal
+        Subt  Cien
+        SkipCond 800
+        Jump  ImpCFin
+        Store ImpVal
+        Load  ImpDig
+        Add   Uno
+        Store ImpDig
+        Jump  ImpC
+ImpCFin, Load  ImpDig
+        SkipCond 400
+        Jump  ImpCSkip
+        Jump  ImpD
+ImpCSkip, Load  ImpDig
+        Add   Ascii0
+        Output
+        LoadImmi 1
+        Store ImpFlag
+ImpD,   Clear
+        Store ImpDig
+ImpD2,  Load  ImpVal
+        Subt  Diez
+        SkipCond 800
+        Jump  ImpDFin
+        Store ImpVal
+        Load  ImpDig
+        Add   Uno
+        Store ImpDig
+        Jump  ImpD2
+ImpDFin, Load  ImpFlag
+        SkipCond 400
+        Jump  ImpDForce
+        Load  ImpDig
+        SkipCond 400
+        Jump  ImpDSkip
+        Jump  ImpU
+ImpDForce, Load  ImpDig
+        Add   Ascii0
+        Output
+        Jump  ImpU2
+ImpDSkip, Load  ImpDig
+        Add   Ascii0
+        Output
+        LoadImmi 1
+        Store ImpFlag
+ImpU,   Load  ImpVal
+ImpU2,  Add   Ascii0
+        Output
+        JumpI ImprimirNum
+
+/ ── Subrutinas de output Unicode ────────────────────────────────
+/ --- Print "Fila:" + NL ---
+PrintMsgFila, HEX 0
+        Load  FilaC0
+        Output
+        Load  FilaC1
+        Output
+        Load  FilaC2
+        Output
+        Load  FilaC3
+        Output
+        Load  FilaC4
+        Output
+        Load  FilaC5
+        Output
+        Load  FilaC6
+        Output
+        Load  FilaC7
+        Output
+        Load  CharNL
+        Output
+        JumpI PrintMsgFila
+
+/ --- Print "Col:" + NL ---
+PrintMsgCol, HEX 0
+        Load  ColC0
+        Output
+        Load  ColC1
+        Output
+        Load  ColC2
+        Output
+        Load  ColC3
+        Output
+        Load  ColC4
+        Output
+        Load  ColC5
+        Output
+        Load  ColC6
+        Output
+        Load  ColC7
+        Output
+        Load  CharNL
+        Output
+        JumpI PrintMsgCol
+
+/ --- Print "Tam:" + NL ---
+PrintMsgTam, HEX 0
+        Load  TamC0
+        Output
+        Load  TamC1
+        Output
+        Load  TamC2
+        Output
+        Load  TamC3
+        Output
+        Load  TamC4
+        Output
+        Load  TamC5
+        Output
+        Load  TamC6
+        Output
+        Load  TamC7
+        Output
+        Load  CharNL
+        Output
+        JumpI PrintMsgTam
+
+/ --- Print "Acc:" + NL ---
+PrintMsgAcc, HEX 0
+        Load  AccC0
+        Output
+        Load  AccC1
+        Output
+        Load  AccC2
+        Output
+        Load  AccC3
+        Output
+        Load  AccC4
+        Output
+        Load  AccC5
+        Output
+        Load  AccC6
+        Output
+        Load  AccC7
+        Output
+        Load  CharNL
+        Output
+        JumpI PrintMsgAcc
+
+/ --- Print "NoBand!" + NL ---
+PrintMsgBand, HEX 0
+        Load  BandC0
+        Output
+        Load  BandC1
+        Output
+        Load  BandC2
+        Output
+        Load  BandC3
+        Output
+        Load  BandC4
+        Output
+        Load  BandC5
+        Output
+        Load  BandC6
+        Output
+        Load  BandC7
+        Output
+        Load  CharNL
+        Output
+        JumpI PrintMsgBand
+
+/ --- Print "Movs:" + NL ---
+PrintMsgMov, HEX 0
+        Load  MovC0
+        Output
+        Load  MovC1
+        Output
+        Load  MovC2
+        Output
+        Load  MovC3
+        Output
+        Load  MovC4
+        Output
+        Load  MovC5
+        Output
+        JumpI PrintMsgMov
+
+/ --- Print "Ganaste!" + NL ---
+PrintMsgGana, HEX 0
+        Load  GanaC0
+        Output
+        Load  GanaC1
+        Output
+        Load  GanaC2
+        Output
+        Load  GanaC3
+        Output
+        Load  GanaC4
+        Output
+        Load  GanaC5
+        Output
+        Load  GanaC6
+        Output
+        Load  GanaC7
+        Output
+        Load  CharNL
+        Output
+        JumpI PrintMsgGana
+
+/ --- Print "Perdiste" + NL ---
+PrintMsgPierde, HEX 0
+        Load  PierdeC0
+        Output
+        Load  PierdeC1
+        Output
+        Load  PierdeC2
+        Output
+        Load  PierdeC3
+        Output
+        Load  PierdeC4
+        Output
+        Load  PierdeC5
+        Output
+        Load  PierdeC6
+        Output
+        Load  PierdeC7
+        Output
+        Load  CharNL
+        Output
+        JumpI PrintMsgPierde
+
+/ ── Constantes de chars Unicode ─────────────────────────────────
+CharNL,      HEX 00A     / salto de linea
+
+/ "Fila:"
+FilaC0,        HEX 046     / 'F'
+FilaC1,        HEX 069     / 'i'
+FilaC2,        HEX 06C     / 'l'
+FilaC3,        HEX 061     / 'a'
+FilaC4,        HEX 03A     / ':'
+FilaC5,        HEX 020     / ' '
+FilaC6,        HEX 020     / ' '
+FilaC7,        HEX 020     / ' '
+
+/ "Col:"
+ColC0,         HEX 043     / 'C'
+ColC1,         HEX 06F     / 'o'
+ColC2,         HEX 06C     / 'l'
+ColC3,         HEX 03A     / ':'
+ColC4,         HEX 020     / ' '
+ColC5,         HEX 020     / ' '
+ColC6,         HEX 020     / ' '
+ColC7,         HEX 020     / ' '
+
+/ "Tam:"
+TamC0,         HEX 054     / 'T'
+TamC1,         HEX 061     / 'a'
+TamC2,         HEX 06D     / 'm'
+TamC3,         HEX 03A     / ':'
+TamC4,         HEX 020     / ' '
+TamC5,         HEX 020     / ' '
+TamC6,         HEX 020     / ' '
+TamC7,         HEX 020     / ' '
+
+/ "Acc:"
+AccC0,         HEX 041     / 'A'
+AccC1,         HEX 063     / 'c'
+AccC2,         HEX 063     / 'c'
+AccC3,         HEX 03A     / ':'
+AccC4,         HEX 020     / ' '
+AccC5,         HEX 020     / ' '
+AccC6,         HEX 020     / ' '
+AccC7,         HEX 020     / ' '
+
+/ "NoBand!"
+BandC0,        HEX 04E     / 'N'
+BandC1,        HEX 06F     / 'o'
+BandC2,        HEX 042     / 'B'
+BandC3,        HEX 061     / 'a'
+BandC4,        HEX 06E     / 'n'
+BandC5,        HEX 064     / 'd'
+BandC6,        HEX 021     / '!'
+BandC7,        HEX 020     / ' '
+
+/ "Movs:"
+MovC0,         HEX 04D     / 'M'
+MovC1,         HEX 06F     / 'o'
+MovC2,         HEX 076     / 'v'
+MovC3,         HEX 073     / 's'
+MovC4,         HEX 03A     / ':'
+MovC5,         HEX 020     / ' '
+
+/ "Ganaste!"
+GanaC0,        HEX 047     / 'G'
+GanaC1,        HEX 061     / 'a'
+GanaC2,        HEX 06E     / 'n'
+GanaC3,        HEX 061     / 'a'
+GanaC4,        HEX 073     / 's'
+GanaC5,        HEX 074     / 't'
+GanaC6,        HEX 065     / 'e'
+GanaC7,        HEX 021     / '!'
+
+/ "Perdiste"
+PierdeC0,      HEX 050     / 'P'
+PierdeC1,      HEX 065     / 'e'
+PierdeC2,      HEX 072     / 'r'
+PierdeC3,      HEX 064     / 'd'
+PierdeC4,      HEX 069     / 'i'
+PierdeC5,      HEX 073     / 's'
+PierdeC6,      HEX 074     / 't'
+PierdeC7,      HEX 065     / 'e'
+
+
+/ ── Padding (125 palabras) hasta 0x400 ─────────────────────
+        DEC 0
+        DEC 0
+        DEC 0
+        DEC 0
+        DEC 0
+        DEC 0
+        DEC 0
+        DEC 0
+        DEC 0
+        DEC 0
+        DEC 0
+        DEC 0
+        DEC 0
+        DEC 0
+        DEC 0
+        DEC 0
+        DEC 0
+        DEC 0
+        DEC 0
+        DEC 0
+        DEC 0
+        DEC 0
+        DEC 0
+        DEC 0
+        DEC 0
+        DEC 0
+        DEC 0
+        DEC 0
+        DEC 0
+        DEC 0
+        DEC 0
+        DEC 0
+        DEC 0
+        DEC 0
+        DEC 0
+        DEC 0
+        DEC 0
+        DEC 0
+        DEC 0
+        DEC 0
+        DEC 0
+        DEC 0
+        DEC 0
+        DEC 0
+        DEC 0
+        DEC 0
+        DEC 0
+        DEC 0
+        DEC 0
+        DEC 0
+        DEC 0
+        DEC 0
+        DEC 0
+        DEC 0
+        DEC 0
+        DEC 0
+        DEC 0
+        DEC 0
+        DEC 0
+        DEC 0
+        DEC 0
+        DEC 0
+        DEC 0
+        DEC 0
+        DEC 0
+        DEC 0
+        DEC 0
+        DEC 0
+        DEC 0
+        DEC 0
+        DEC 0
+        DEC 0
+        DEC 0
+        DEC 0
+        DEC 0
+        DEC 0
+        DEC 0
+        DEC 0
+        DEC 0
+        DEC 0
+        DEC 0
+        DEC 0
+        DEC 0
+        DEC 0
+        DEC 0
+        DEC 0
+        DEC 0
+        DEC 0
+        DEC 0
+        DEC 0
+        DEC 0
+        DEC 0
+        DEC 0
+        DEC 0
+        DEC 0
+        DEC 0
+        DEC 0
+        DEC 0
+        DEC 0
+        DEC 0
+        DEC 0
+        DEC 0
+        DEC 0
+        DEC 0
+        DEC 0
+        DEC 0
+        DEC 0
+        DEC 0
+        DEC 0
+        DEC 0
+        DEC 0
+        DEC 0
+        DEC 0
+        DEC 0
+        DEC 0
+        DEC 0
+        DEC 0
+        DEC 0
+        DEC 0
+        DEC 0
+        DEC 0
+        DEC 0
+        DEC 0
+        DEC 0
+        DEC 0
+
+/ ── Tablero en 0x400: -1=mina | 0-8=distancia ────────────────
+/ Fila  1: 0 0 0 0 0 0 1 1 1 0 0 0 0 0 0 0
+        DEC      0
+        DEC      0
+        DEC      0
+        DEC      0
+        DEC      0
+        DEC      0
+        DEC      1
+        DEC      1
+        DEC      1
+        DEC      0
+        DEC      0
+        DEC      0
+        DEC      0
+        DEC      0
+        DEC      0
+        DEC      0
+
+/ Fila  2: 0 0 0 0 0 0 1 * 1 0 0 0 0 0 0 0
+        DEC      0
+        DEC      0
+        DEC      0
+        DEC      0
+        DEC      0
+        DEC      0
+        DEC      1
+        DEC     -1
+        DEC      1
+        DEC      0
+        DEC      0
+        DEC      0
+        DEC      0
+        DEC      0
+        DEC      0
+        DEC      0
+
+/ Fila  3: 0 0 0 0 0 0 1 1 1 0 0 0 0 0 0 0
+        DEC      0
+        DEC      0
+        DEC      0
+        DEC      0
+        DEC      0
+        DEC      0
+        DEC      1
+        DEC      1
+        DEC      1
+        DEC      0
+        DEC      0
+        DEC      0
+        DEC      0
+        DEC      0
+        DEC      0
+        DEC      0
+
+/ Fila  4: 0 0 0 0 0 0 1 1 1 0 0 0 0 0 0 0
+        DEC      0
+        DEC      0
+        DEC      0
+        DEC      0
+        DEC      0
+        DEC      0
+        DEC      1
+        DEC      1
+        DEC      1
+        DEC      0
+        DEC      0
+        DEC      0
+        DEC      0
+        DEC      0
+        DEC      0
+        DEC      0
+
+/ Fila  5: 0 0 0 0 0 0 1 * 1 0 0 0 0 0 0 0
+        DEC      0
+        DEC      0
+        DEC      0
+        DEC      0
+        DEC      0
+        DEC      0
+        DEC      1
+        DEC     -1
+        DEC      1
+        DEC      0
+        DEC      0
+        DEC      0
+        DEC      0
+        DEC      0
+        DEC      0
+        DEC      0
+
+/ Fila  6: 1 1 0 0 0 0 1 1 1 0 0 0 0 0 0 0
+        DEC      1
+        DEC      1
+        DEC      0
+        DEC      0
+        DEC      0
+        DEC      0
+        DEC      1
+        DEC      1
+        DEC      1
+        DEC      0
+        DEC      0
+        DEC      0
+        DEC      0
+        DEC      0
+        DEC      0
+        DEC      0
+
+/ Fila  7: * 1 0 0 0 0 0 0 0 0 0 1 1 1 0 0
+        DEC     -1
+        DEC      1
+        DEC      0
+        DEC      0
+        DEC      0
+        DEC      0
+        DEC      0
+        DEC      0
+        DEC      0
+        DEC      0
+        DEC      0
+        DEC      1
+        DEC      1
+        DEC      1
+        DEC      0
+        DEC      0
+
+/ Fila  8: 2 2 1 0 0 0 0 0 0 0 0 1 * 1 0 0
+        DEC      2
+        DEC      2
+        DEC      1
+        DEC      0
+        DEC      0
+        DEC      0
+        DEC      0
+        DEC      0
+        DEC      0
+        DEC      0
+        DEC      0
+        DEC      1
+        DEC     -1
+        DEC      1
+        DEC      0
+        DEC      0
+
+/ Fila  9: 1 * 1 0 0 0 0 0 0 0 0 1 1 1 0 0
+        DEC      1
+        DEC     -1
+        DEC      1
+        DEC      0
+        DEC      0
+        DEC      0
+        DEC      0
+        DEC      0
+        DEC      0
+        DEC      0
+        DEC      0
+        DEC      1
+        DEC      1
+        DEC      1
+        DEC      0
+        DEC      0
+
+/ Fila 10: 1 1 1 0 0 0 0 0 0 0 0 0 0 0 0 0
+        DEC      1
+        DEC      1
+        DEC      1
+        DEC      0
+        DEC      0
+        DEC      0
+        DEC      0
+        DEC      0
+        DEC      0
+        DEC      0
+        DEC      0
+        DEC      0
+        DEC      0
+        DEC      0
+        DEC      0
+        DEC      0
+
+/ Fila 11: 0 0 0 0 0 0 0 0 0 1 1 1 0 0 0 0
+        DEC      0
+        DEC      0
+        DEC      0
+        DEC      0
+        DEC      0
+        DEC      0
+        DEC      0
+        DEC      0
+        DEC      0
+        DEC      1
+        DEC      1
+        DEC      1
+        DEC      0
+        DEC      0
+        DEC      0
+        DEC      0
+
+/ Fila 12: 0 0 0 0 0 0 0 0 0 1 * 1 0 0 0 0
+        DEC      0
+        DEC      0
+        DEC      0
+        DEC      0
+        DEC      0
+        DEC      0
+        DEC      0
+        DEC      0
+        DEC      0
+        DEC      1
+        DEC     -1
+        DEC      1
+        DEC      0
+        DEC      0
+        DEC      0
+        DEC      0
+
+/ Fila 13: 0 0 0 0 0 0 0 0 0 1 1 1 0 0 0 0
+        DEC      0
+        DEC      0
+        DEC      0
+        DEC      0
+        DEC      0
+        DEC      0
+        DEC      0
+        DEC      0
+        DEC      0
+        DEC      1
+        DEC      1
+        DEC      1
+        DEC      0
+        DEC      0
+        DEC      0
+        DEC      0
+
+/ Fila 14: 1 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+        DEC      1
+        DEC      1
+        DEC      0
+        DEC      0
+        DEC      0
+        DEC      0
+        DEC      0
+        DEC      0
+        DEC      0
+        DEC      0
+        DEC      0
+        DEC      0
+        DEC      0
+        DEC      0
+        DEC      0
+        DEC      0
+
+/ Fila 15: * 1 0 0 0 0 0 0 0 0 1 1 1 0 0 0
+        DEC     -1
+        DEC      1
+        DEC      0
+        DEC      0
+        DEC      0
+        DEC      0
+        DEC      0
+        DEC      0
+        DEC      0
+        DEC      0
+        DEC      1
+        DEC      1
+        DEC      1
+        DEC      0
+        DEC      0
+        DEC      0
+
+/ Fila 16: 1 1 0 0 0 0 0 0 0 0 1 * 1 0 0 0
+        DEC      1
+        DEC      1
+        DEC      0
+        DEC      0
+        DEC      0
+        DEC      0
+        DEC      0
+        DEC      0
+        DEC      0
+        DEC      0
+        DEC      1
+        DEC     -1
+        DEC      1
+        DEC      0
+        DEC      0
+        DEC      0
